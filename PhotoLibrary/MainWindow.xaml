@@ -3,11 +3,40 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:viewModels="clr-namespace:PhotoLibrary.ViewModels"
         xmlns:local="clr-namespace:PhotoLibrary"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800"
-	    WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Title="MainWindow" Height="450" Width="800"  >
+    <!--Loaded="OnLoaded"-->
+    <Window.Resources>
+        <DataTemplate DataType="{x:Type viewModels:PictureViewModel}">
+            <Border Height="200" Width="200">
+                <TextBox Text="{Binding Path}" IsReadOnly="True" />
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
     <Grid>
-
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="300" MinWidth="100" />
+            <ColumnDefinition Width="auto" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <GridSplitter Grid.Column="1" 
+                      HorizontalAlignment="Center" 
+                      VerticalAlignment="Stretch" 
+                      ShowsPreview="False"
+                      Width="5"/>
+        <ListView Grid.Column="2" 
+                  ItemsSource="{Binding Images}" 
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled" 
+                  ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ListView.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <WrapPanel />
+                </ItemsPanelTemplate>
+            </ListView.ItemsPanel>
+        </ListView>
     </Grid>
+
 </Window>

@@ -1,17 +1,10 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using System.ComponentModel.Composition.Hosting;
-using System.Configuration;
-using System.Data;
-using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
 using System.Windows;
 
 namespace PhotoLibrary
 {
-
     /// <summary>
     ///  Helper class to access the exported resources
     /// </summary>
@@ -84,6 +77,5 @@ namespace PhotoLibrary
         {
              
         }
-
     }
 }
