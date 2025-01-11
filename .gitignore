@@ -1,4 +1,6 @@
 .vs
 PhotoLibrary/bin
 PhotoLibrary/obj
+PhotoLibraryTests/bin
+PhotoLibraryTests/obj
 *csproj.user
