@@ -1,29 +1,58 @@
 using Moq;
+using Newtonsoft.Json.Bson;
 using PhotoLibrary.DB;
 using PhotoLibrary.Settings;
-using System.Diagnostics;
+using System.Windows.Controls.Primitives;
 
 namespace PhotoLibraryTests;
 
 [TestClass]
 public class DatabaseTests
 {
+    private static readonly string _databaseFile = "test.db";
+
+    [ClassInitialize]
+    public static void ClassInit(TestContext ctx)
+    {
+        if (File.Exists(_databaseFile))
+        {
+            File.Delete(_databaseFile);
+        }
+    }
+
     [TestMethod]
     public void TestDatabaseCreation()
     {
-
-        string testDbName = "test.db";
-
+        // Arrange
         var settingsMock = new Mock<IApplicationSettings>();
-        settingsMock.Setup(lib => lib.DatabasePath).Returns(testDbName);
+        settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
         PhotoDb db = new PhotoDb(settingsMock.Object);
+        Assert.IsFalse(File.Exists(_databaseFile));
         
-        Assert.IsFalse(File.Exists(testDbName));
-
+        // Act
         db.Init();
 
-        Assert.IsTrue(File.Exists(testDbName));
+        // Assert
+        Assert.IsTrue(File.Exists(_databaseFile));
         db.Deinit();
-        File.Delete(testDbName);
+        File.Delete(_databaseFile);
+    }
+
+    [TestMethod]
+    public void TestInsertPhoto()
+    {
+        // Arrange
+        var settingsMock = new Mock<IApplicationSettings>();
+        settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
+        PhotoDb db = new PhotoDb(settingsMock.Object);
+        Assert.IsFalse(File.Exists(_databaseFile));
+        db.Init();
+
+        // Act
+        bool inserted = false;
+        // bool inserted = db.InsertPhotoRecord(new PhotoRecord("picture.png", 1024,));
+        
+        // Assert
+        Assert.IsTrue(inserted);
     }
 }
