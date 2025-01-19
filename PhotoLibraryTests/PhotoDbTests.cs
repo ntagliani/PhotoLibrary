@@ -1,7 +1,9 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Newtonsoft.Json.Bson;
 using PhotoLibrary.DB;
 using PhotoLibrary.Settings;
+using System.Security.Cryptography;
 using System.Windows.Controls.Primitives;
 
 namespace PhotoLibraryTests;
@@ -10,6 +12,12 @@ namespace PhotoLibraryTests;
 public class DatabaseTests
 {
     private static readonly string _databaseFile = "test.db";
+    private static readonly int KiloByte = 1024;
+    private static readonly int MegaByte = 1024 * KiloByte;
+    private static readonly int GigaByte = 1024 * MegaByte;
+    private static readonly string HASH_CHARACTER_SET = "1234567890abcdef";
+    private static readonly string FILE_CHARACTER_SET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890";
+    private Random m_rnd = new Random();
 
     [ClassInitialize]
     public static void ClassInit(TestContext ctx)
@@ -20,8 +28,36 @@ public class DatabaseTests
         }
     }
 
+    private string GenerateRandomString(int length, string characterSet)
+    {
+        var strChar = new char[length];
+        for (int i = 0; i < length; i++)
+        {
+            strChar[i] = characterSet[m_rnd.Next(characterSet.Length)];
+        }
+        return new string(strChar);        
+    }
+
+    private DateTime GenerateRandomDate()
+    {
+        long startTick = 615044448; // =  var startDate = new DateTime(1950, 1,1,00,00,00,00).Tick / 1000000000;
+        long endTick = 638712864; //  var endDate = new DateTime(2025, 1, 1, 00, 00, 00, 00).Tick / 1000000000;
+        return new DateTime(m_rnd.NextInt64(startTick, endTick)*1000000000); // make sure that the nanomicroseconds are 0
+    }
+
+    private PhotoDb.FileRecord GenerateRandomRecord()
+    {
+       var hash = GenerateRandomString(20, HASH_CHARACTER_SET);
+       return new PhotoDb.FileRecord(-1, GenerateRandomString(8, FILE_CHARACTER_SET), m_rnd.Next(4*KiloByte, 100*MegaByte), hash, hash.Substring(0,2), GenerateRandomDate());
+    }
+
+    private int AddRecord(PhotoDb db, PhotoDb.FileRecord record)
+    {
+        return db.AddFile(record.Filename, record.Size, record.Hash, record.Path, record.CreationDate, Enumerable.Empty<int>());
+    }
+
     [TestMethod]
-    public void TestDatabaseCreation()
+    public void Test_DatabaseCreation()
     {
         // Arrange
         var settingsMock = new Mock<IApplicationSettings>();
@@ -39,7 +75,7 @@ public class DatabaseTests
     }
 
     [TestMethod]
-    public void TestInsertPhoto()
+    public void Test_InsertFile()
     {
         // Arrange
         var settingsMock = new Mock<IApplicationSettings>();
@@ -49,10 +85,118 @@ public class DatabaseTests
         db.Init();
 
         // Act
-        bool inserted = false;
-        // bool inserted = db.InsertPhotoRecord(new PhotoRecord("picture.png", 1024,));
-        
+        int fileId1 = AddRecord(db, GenerateRandomRecord());
+        int fileId2 = AddRecord(db, GenerateRandomRecord());
+
+        Assert.IsTrue(fileId1 != fileId2);
+
+        db.Deinit();
+        File.Delete(_databaseFile);
+    }
+
+    [TestMethod]
+    public void Test_GetFiles()
+    {
+        // Arrange
+        var settingsMock = new Mock<IApplicationSettings>();
+        settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
+        PhotoDb db = new PhotoDb(settingsMock.Object);
+        Assert.IsFalse(File.Exists(_databaseFile));
+        db.Init();
+        Dictionary<int, PhotoDb.FileRecord> insertedRecords = new();
+        int recordCount = 10;
+        for (int i = 0 ; i < recordCount; i++)
+        {
+            var record = GenerateRandomRecord();
+            var id = AddRecord(db, record);
+            Assert.IsFalse(insertedRecords.ContainsKey(id));
+            insertedRecords.Add(id, record);
+        }
+
+        // Act
+        var records = db.GetAllFiles();
+
         // Assert
-        Assert.IsTrue(inserted);
+        Assert.IsNotNull(records);
+        Assert.IsTrue(records.Count() == recordCount);
+        foreach (var record in records)
+        {
+            Assert.IsTrue(insertedRecords.ContainsKey(record.Id));
+            insertedRecords.TryGetValue(record.Id, out PhotoDb.FileRecord? value);
+            
+            Assert.IsNotNull(value);
+            Assert.AreEqual(value.Filename, record.Filename);
+            Assert.AreEqual(value.Size, record.Size);
+            Assert.AreEqual(value.Hash, record.Hash);
+            Assert.AreEqual(value.Path, record.Path);
+            Assert.AreEqual(value.CreationDate, record.CreationDate);
+            
+            insertedRecords.Remove(record.Id);
+        }
+        Assert.IsTrue(insertedRecords.Count == 0);
+
+        db.Deinit();
+        File.Delete(_databaseFile);
+    }
+
+    [TestMethod]
+    public void Test_RemoveFile()
+    {
+        // Arrange
+        var settingsMock = new Mock<IApplicationSettings>();
+        settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
+        PhotoDb db = new PhotoDb(settingsMock.Object);
+        Assert.IsFalse(File.Exists(_databaseFile));
+        db.Init();
+        Dictionary<int, PhotoDb.FileRecord> insertedRecords = new();
+        int recordCount = 10;
+        for (int i = 0; i < recordCount; i++)
+        {
+            var record = GenerateRandomRecord();
+            var id = AddRecord(db, record);
+            Assert.IsFalse(insertedRecords.ContainsKey(id));
+            insertedRecords.Add(id, record);
+        }
+        var records = db.GetAllFiles();
+        Assert.IsNotNull(records);
+        Assert.IsTrue(records.Count() == recordCount);
+
+        // Act
+        foreach (var recordKey in insertedRecords.Keys)
+        {
+            db.DeleteFile(recordKey); 
+        }
+
+        // Assert
+        var recordsAfterDeletion = db.GetAllFiles();
+        Assert.IsNotNull(recordsAfterDeletion);
+        Assert.IsTrue(recordsAfterDeletion.Count() == 0);
+
+        db.Deinit();
+        File.Delete(_databaseFile);
+    }
+
+
+
+    [TestMethod]
+    public void Test_InsertEvent()
+    {
+        // Arrange
+        var settingsMock = new Mock<IApplicationSettings>();
+        settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
+        PhotoDb db = new PhotoDb(settingsMock.Object);
+        Assert.IsFalse(File.Exists(_databaseFile));
+        db.Init();
+
+        // Act
+        var eventName = GenerateRandomString(40, FILE_CHARACTER_SET);
+        int eventId1 = db.AddEvent(eventName);
+        int eventId2 = db.AddEvent(eventName);
+
+        Assert.IsTrue(eventId1 != eventId2);
+
+
+        db.Deinit();
+        File.Delete(_databaseFile);
     }
 }
