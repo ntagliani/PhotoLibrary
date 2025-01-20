@@ -73,8 +73,6 @@ public class DatabaseTests
         return db.AddFile(record.Filename, record.Size, record.Hash, record.Path, record.CreationDate, Enumerable.Empty<int>());
     }
 
-
-
     [TestMethod]
     public void Test_DatabaseCreation()
     {
@@ -219,8 +217,42 @@ public class DatabaseTests
         int eventId1 = db.AddEvent(eventName);
         int eventId2 = db.AddEvent(eventName);
 
+        // Assert
         Assert.IsTrue(eventId1 != eventId2);
 
+        db.Deinit();
+        File.Delete(_databaseFile);
+    }
+
+    [TestMethod]
+    public void Test_GetAllEvents()
+    {
+        // Arrange
+        var settingsMock = new Mock<IApplicationSettings>();
+        settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
+        PhotoDb db = new PhotoDb(settingsMock.Object);
+        Assert.IsFalse(File.Exists(_databaseFile));
+        db.Init();
+
+        int eventToInsert = 40;
+        Dictionary<int, string> insertedEvents = [];
+        for (int i = 0; i < eventToInsert; i++)
+        {
+            var eventName = GenerateRandomString(40, FILE_CHARACTER_SET);
+            int eventId = db.AddEvent(eventName);
+            insertedEvents.Add(eventId, eventName);
+        }
+
+        // Act
+        var events = db.GetAllEvents();
+
+        foreach (var evt in events)
+        {
+            Assert.IsTrue(insertedEvents.ContainsKey(evt.Id));
+            Assert.AreEqual(insertedEvents[evt.Id], evt.Name);
+            insertedEvents.Remove(evt.Id);
+        }
+        Assert.IsTrue(insertedEvents.Count == 0);
 
         db.Deinit();
         File.Delete(_databaseFile);
