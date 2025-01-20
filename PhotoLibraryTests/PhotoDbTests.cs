@@ -8,6 +8,23 @@ using System.Windows.Controls.Primitives;
 
 namespace PhotoLibraryTests;
 
+public static class Extensions
+{
+    public static void Shuffle<T>(this IList<T> list)
+    {
+        Random rng = new Random();
+        int n = list.Count;
+        while (n > 1)
+        {
+            n--;
+            int k = rng.Next(n + 1);
+            T value = list[k];
+            list[k] = list[n];
+            list[n] = value;
+        }
+    }
+}
+
 [TestClass]
 public class DatabaseTests
 {
@@ -35,26 +52,28 @@ public class DatabaseTests
         {
             strChar[i] = characterSet[m_rnd.Next(characterSet.Length)];
         }
-        return new string(strChar);        
+        return new string(strChar);
     }
 
     private DateTime GenerateRandomDate()
     {
         long startTick = 615044448; // =  var startDate = new DateTime(1950, 1,1,00,00,00,00).Tick / 1000000000;
         long endTick = 638712864; //  var endDate = new DateTime(2025, 1, 1, 00, 00, 00, 00).Tick / 1000000000;
-        return new DateTime(m_rnd.NextInt64(startTick, endTick)*1000000000); // make sure that the nanomicroseconds are 0
+        return new DateTime(m_rnd.NextInt64(startTick, endTick) * 1000000000); // make sure that the nanomicroseconds are 0
     }
 
     private PhotoDb.FileRecord GenerateRandomRecord()
     {
-       var hash = GenerateRandomString(20, HASH_CHARACTER_SET);
-       return new PhotoDb.FileRecord(-1, GenerateRandomString(8, FILE_CHARACTER_SET), m_rnd.Next(4*KiloByte, 100*MegaByte), hash, hash.Substring(0,2), GenerateRandomDate());
+        var hash = GenerateRandomString(20, HASH_CHARACTER_SET);
+        return new PhotoDb.FileRecord(-1, GenerateRandomString(8, FILE_CHARACTER_SET), m_rnd.Next(4 * KiloByte, 100 * MegaByte), hash, hash.Substring(0, 2), GenerateRandomDate());
     }
 
     private int AddRecord(PhotoDb db, PhotoDb.FileRecord record)
     {
         return db.AddFile(record.Filename, record.Size, record.Hash, record.Path, record.CreationDate, Enumerable.Empty<int>());
     }
+
+
 
     [TestMethod]
     public void Test_DatabaseCreation()
@@ -64,7 +83,7 @@ public class DatabaseTests
         settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
         PhotoDb db = new PhotoDb(settingsMock.Object);
         Assert.IsFalse(File.Exists(_databaseFile));
-        
+
         // Act
         db.Init();
 
@@ -105,7 +124,7 @@ public class DatabaseTests
         db.Init();
         Dictionary<int, PhotoDb.FileRecord> insertedRecords = new();
         int recordCount = 10;
-        for (int i = 0 ; i < recordCount; i++)
+        for (int i = 0; i < recordCount; i++)
         {
             var record = GenerateRandomRecord();
             var id = AddRecord(db, record);
@@ -123,14 +142,14 @@ public class DatabaseTests
         {
             Assert.IsTrue(insertedRecords.ContainsKey(record.Id));
             insertedRecords.TryGetValue(record.Id, out PhotoDb.FileRecord? value);
-            
+
             Assert.IsNotNull(value);
             Assert.AreEqual(value.Filename, record.Filename);
             Assert.AreEqual(value.Size, record.Size);
             Assert.AreEqual(value.Hash, record.Hash);
             Assert.AreEqual(value.Path, record.Path);
             Assert.AreEqual(value.CreationDate, record.CreationDate);
-            
+
             insertedRecords.Remove(record.Id);
         }
         Assert.IsTrue(insertedRecords.Count == 0);
@@ -161,10 +180,17 @@ public class DatabaseTests
         Assert.IsNotNull(records);
         Assert.IsTrue(records.Count() == recordCount);
 
+        var keyList = insertedRecords.Keys.ToList();
+        keyList.Shuffle();
+        var firstHalf = keyList[0..(recordCount / 2)];
+        var secondHalf = keyList[(recordCount / 2)..^0];
+
+
         // Act
-        foreach (var recordKey in insertedRecords.Keys)
+        db.DeleteFiles(firstHalf);
+        foreach (var recordKey in secondHalf)
         {
-            db.DeleteFile(recordKey); 
+            db.DeleteFile(recordKey);
         }
 
         // Assert
