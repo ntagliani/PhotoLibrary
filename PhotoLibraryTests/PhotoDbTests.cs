@@ -35,7 +35,7 @@ public class DatabaseTests
     private static readonly string HASH_CHARACTER_SET = "1234567890abcdef";
     private static readonly string FILE_CHARACTER_SET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890";
     private Random m_rnd = new Random();
-    private PhotoDb db = null;
+    private FileDb db = null;
 
     [ClassInitialize]
     public static void ClassInit(TestContext ctx)
@@ -63,17 +63,17 @@ public class DatabaseTests
         return new DateTime(m_rnd.NextInt64(startTick, endTick) * 1000000000); // make sure that the nanomicroseconds are 0
     }
 
-    private PhotoDb.FileRecord GenerateRandomRecord()
+    private IFileDb.FileRecord GenerateRandomRecord()
     {
         var hash = GenerateRandomString(20, HASH_CHARACTER_SET);
-        return new PhotoDb.FileRecord(-1, GenerateRandomString(8, FILE_CHARACTER_SET), m_rnd.Next(4 * KiloByte, 100 * MegaByte), hash, hash.Substring(0, 2), GenerateRandomDate());
+        return new IFileDb.FileRecord(-1, GenerateRandomString(8, FILE_CHARACTER_SET), m_rnd.Next(4 * KiloByte, 100 * MegaByte), hash, hash.Substring(0, 2), GenerateRandomDate());
     }
 
-    private int AddRecord(PhotoDb db, PhotoDb.FileRecord record)
+    private int AddRecord(FileDb db, IFileDb.FileRecord record)
     {
         return AddRecord(db, record, Enumerable.Empty<int>());
     }
-    private int AddRecord(PhotoDb db, PhotoDb.FileRecord record, IEnumerable<int> events)
+    private int AddRecord(FileDb db, IFileDb.FileRecord record, IEnumerable<int> events)
     {
         return db.AddFile(record.Filename, record.Size, record.Hash, record.Path, record.CreationDate, events);
     }
@@ -83,7 +83,7 @@ public class DatabaseTests
     {
         var settingsMock = new Mock<IApplicationSettings>();
         settingsMock.Setup(lib => lib.DatabasePath).Returns(_databaseFile);
-        db = new PhotoDb(settingsMock.Object);
+        db = new FileDb(settingsMock.Object);
         Assert.IsFalse(File.Exists(_databaseFile));
         db.Init();
     }
@@ -117,7 +117,7 @@ public class DatabaseTests
     public void Test_GetFiles()
     {
         // Arrange
-        Dictionary<int, PhotoDb.FileRecord> insertedRecords = new();
+        Dictionary<int, IFileDb.FileRecord> insertedRecords = new();
         int recordCount = 10;
         for (int i = 0; i < recordCount; i++)
         {
@@ -136,7 +136,7 @@ public class DatabaseTests
         foreach (var record in records)
         {
             Assert.IsTrue(insertedRecords.ContainsKey(record.Id));
-            insertedRecords.TryGetValue(record.Id, out PhotoDb.FileRecord? value);
+            insertedRecords.TryGetValue(record.Id, out IFileDb.FileRecord? value);
 
             Assert.IsNotNull(value);
             Assert.AreEqual(value.Filename, record.Filename);
@@ -154,7 +154,7 @@ public class DatabaseTests
     public void Test_DeleteFile()
     {
         // Arrange
-        Dictionary<int, PhotoDb.FileRecord> insertedRecords = [];
+        Dictionary<int, IFileDb.FileRecord> insertedRecords = [];
         int recordCount = 10;
         for (int i = 0; i < recordCount; i++)
         {
@@ -260,7 +260,7 @@ public class DatabaseTests
     struct InsertedRecord
     {
         public int id;
-        public PhotoDb.FileRecord record;
+        public IFileDb.FileRecord record;
     }
 
     [TestMethod]
