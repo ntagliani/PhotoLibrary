@@ -6,6 +6,7 @@ using System.ComponentModel.Composition;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Transactions;
 using System.Windows.Controls;
@@ -13,18 +14,15 @@ using System.Windows.Controls;
 namespace PhotoLibrary.DB;
 
 
-[Export(typeof(PhotoDb))]
+[Export(typeof(IFileDb))]
 [PartCreationPolicy(CreationPolicy.Shared)]
-public class PhotoDb
+public class FileDb : IFileDb
 {
-    public record FileRecord(int Id, string Filename, int Size, string Hash, string Path, DateTime CreationDate);
-    public record EventRecord(int Id, string Name);
-
     private IApplicationSettings _settings;
     private SqliteConnection _sqliteConnection;
 
     [ImportingConstructor]
-    public PhotoDb(IApplicationSettings settings)
+    public FileDb(IApplicationSettings settings)
     {
         _settings = settings;
     }
@@ -66,7 +64,7 @@ public class PhotoDb
         return Convert.ToInt32(command.ExecuteScalar());
     }
 
-    public EventRecord GetEvent(int eventId)
+    public IFileDb.EventRecord GetEvent(int eventId)
     {
         var command = _sqliteConnection.CreateCommand();
         command.CommandText = $"SELECT FROM events WHERE id = {eventId}";
@@ -94,12 +92,12 @@ public class PhotoDb
         }
     }
 
-    public IEnumerable<EventRecord> GetAllEvents()
+    public IEnumerable<IFileDb.EventRecord> GetAllEvents()
     {
         var command = _sqliteConnection.CreateCommand();
         command.CommandText = "SELECT * FROM events";
         var reader = command.ExecuteReader();
-        List<EventRecord> events = [];
+        List<IFileDb.EventRecord> events = [];
         while (reader.Read())
         {
             events.Add(GetFullEventRecord(reader));
@@ -196,10 +194,10 @@ public class PhotoDb
             throw new Exception("Not all the requested lines where deleted");
         }
     }
-    public IEnumerable<FileRecord> GetFilesByEventId(int eventId)
+    public IEnumerable<IFileDb.FileRecord> GetFilesByEventId(int eventId)
     {
         var command = _sqliteConnection.CreateCommand();
-        List<FileRecord> records = [];
+        List<IFileDb.FileRecord> records = [];
         command.CommandText = $"SELECT * FROM files WHERE id in (SELECT fileId FROM fileEvent WHERE eventId = {eventId})";
         var reader = command.ExecuteReader();
         while (reader.Read())
@@ -209,10 +207,10 @@ public class PhotoDb
         return records;
     }
 
-    public IEnumerable<FileRecord> GetAllFiles()
+    public IEnumerable<IFileDb.FileRecord> GetAllFiles()
     {
         var command = _sqliteConnection.CreateCommand();
-        List<FileRecord> records = [];
+        List<IFileDb.FileRecord> records = [];
         command.CommandText = "SELECT * FROM files";
         var reader = command.ExecuteReader();
         while (reader.Read())
@@ -286,14 +284,14 @@ public class PhotoDb
     }
 
 
-    private static FileRecord GetFullFileRecord(SqliteDataReader reader)
+    private static IFileDb.FileRecord GetFullFileRecord(SqliteDataReader reader)
     {
         DateTime creationDate = DateTime.Parse(reader["creation"].ToString());
-        return new FileRecord(Convert.ToInt32(reader["id"]), reader["filename"].ToString(), Convert.ToInt32(reader["size"]), reader["hash"].ToString(), reader["path"].ToString(), creationDate);
+        return new IFileDb.FileRecord(Convert.ToInt32(reader["id"]), reader["filename"].ToString(), Convert.ToInt32(reader["size"]), reader["hash"].ToString(), reader["path"].ToString(), creationDate);
     }
-    private static EventRecord GetFullEventRecord(SqliteDataReader reader)
+    private static IFileDb.EventRecord GetFullEventRecord(SqliteDataReader reader)
     {
-        return new EventRecord(Convert.ToInt32(reader["Id"]), reader["name"].ToString());
+        return new IFileDb.EventRecord(Convert.ToInt32(reader["Id"]), reader["name"].ToString());
     }
 
     private int AddFileInternal(string filename, int size, string hash, string path, DateTime date)

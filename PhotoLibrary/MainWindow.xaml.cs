@@ -18,7 +18,7 @@ public partial class MainWindow : Window
     private IEnumerable<ISettings> AllSettings { get; set; }
 
     [Import]
-    private PhotoDb Database { get; set; }
+    private IFileDb Database { get; set; }
 
     [ImportingConstructor]
     public MainWindow(MainWindowViewModel mainWindowViewModel)

@@ -5,10 +5,8 @@ using System.IO;using System.Text.Json.Nodes;
 namespace PhotoLibrary.Settings
 {
     public interface ISettings
-    {
-        
+    {      
         public int Version { get; set; }
-
         public void Load()
         {
             var staticSettings = AddInManager.Instance.GetInstance<StaticSettings>();
