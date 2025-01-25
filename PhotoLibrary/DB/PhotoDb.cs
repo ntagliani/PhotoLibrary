@@ -3,10 +3,12 @@ using PhotoLibrary.Settings;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
+using System.Diagnostics.Tracing;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Transactions;
+using System.Windows.Controls;
 
 namespace PhotoLibrary.DB;
 
@@ -16,10 +18,9 @@ namespace PhotoLibrary.DB;
 public class PhotoDb
 {
     public record FileRecord(int Id, string Filename, int Size, string Hash, string Path, DateTime CreationDate);
-    public record Event(int Id, string Name);
+    public record EventRecord(int Id, string Name);
 
     private IApplicationSettings _settings;
-
     private SqliteConnection _sqliteConnection;
 
     [ImportingConstructor]
@@ -43,28 +44,12 @@ public class PhotoDb
         {
             CreateTables(_sqliteConnection);
         }
-
     }
-    private void CreateMissingFolders(string filePath)
-    {
-        var path = Path.GetDirectoryName(filePath);
-        if (path != null && path != string.Empty)
-            Directory.CreateDirectory(path);
-    }
-    private void CreateTables(SqliteConnection connection)
-    {
-        var command = connection.CreateCommand();
-        command.CommandText =
-            @"CREATE TABLE files (id INTEGER PRIMARY KEY ASC AUTOINCREMENT, filename VARCHAR(256) , size INT, hash CHARACTER(64), path VARCHAR(256), creation DATETIME)";
-        command.ExecuteNonQuery();
 
-        command.CommandText =
-                    @"CREATE TABLE events (id INTEGER PRIMARY KEY ASC AUTOINCREMENT, name VARCHAR(256))";
-        command.ExecuteNonQuery();
-
-        command.CommandText =
-                    @"CREATE TABLE fileEvent (fileId INTEGER REFERENCES files (id), eventId INTEGER REFERENCES events (id), PRIMARY KEY (fileId, eventId))";
-        command.ExecuteNonQuery();
+    public void Deinit()
+    {
+        _sqliteConnection?.Close();
+        SqliteConnection.ClearAllPools();
     }
 
     public int AddEvent(string eventName)
@@ -81,22 +66,22 @@ public class PhotoDb
         return Convert.ToInt32(command.ExecuteScalar());
     }
 
-    public PhotoDb.Event GetEvent(int eventId)
+    public EventRecord GetEvent(int eventId)
     {
         var command = _sqliteConnection.CreateCommand();
         command.CommandText = $"SELECT FROM events WHERE id = {eventId}";
         var reader = command.ExecuteReader();
         if (reader.Read())
         {
-            return new PhotoDb.Event(Convert.ToInt32(reader["Id"]), reader["name"].ToString());
+            return GetFullEventRecord(reader);
         }
         else return null;
     }
-
     public void DeleteEvent(int eventId)
     {
         DeleteEvents(new int[] { eventId });
     }
+
     public void DeleteEvents(IEnumerable<int> eventIds)
     {
         var command = _sqliteConnection.CreateCommand();
@@ -109,15 +94,15 @@ public class PhotoDb
         }
     }
 
-    public IEnumerable<PhotoDb.Event> GetAllEvents()
+    public IEnumerable<EventRecord> GetAllEvents()
     {
         var command = _sqliteConnection.CreateCommand();
         command.CommandText = "SELECT * FROM events";
         var reader = command.ExecuteReader();
-        List<PhotoDb.Event> events = [];
+        List<EventRecord> events = [];
         while (reader.Read())
         {
-            events.Add(new PhotoDb.Event(Convert.ToInt32(reader["Id"]), reader["name"].ToString()));
+            events.Add(GetFullEventRecord(reader));
         }
         return events;
     }
@@ -131,30 +116,11 @@ public class PhotoDb
 
             foreach (var evt in events)
             {
-                AssignFilesToEvent(new int[] { fileId }, evt);
+                AssignFilesToEventInternal(new int[] { fileId }, evt, transaction);
             }
             transaction.Commit();
         }
         return fileId;
-    }
-
-
-    private int AddFileInternal(string filename, int size, string hash, string path, DateTime date)
-    {
-        var command = _sqliteConnection.CreateCommand();
-        command.CommandText = $"INSERT INTO files (filename, size, hash, path, creation) VALUES (@filename, @size, @hash, @path, @date)";
-        command.Parameters.AddWithValue("@filename", filename);
-        command.Parameters.AddWithValue("@size", size);
-        command.Parameters.AddWithValue("@hash", hash);
-        command.Parameters.AddWithValue("@path", path);
-        command.Parameters.AddWithValue("@date", date.ToString("yyyy-MM-dd HH:mm:ss"));
-        int rowsAffected = command.ExecuteNonQuery();
-        if (rowsAffected == 0)
-        {
-            throw new Exception("Unable to insert file");
-        }
-        command.CommandText = "SELECT last_insert_rowid()";
-        return Convert.ToInt32(command.ExecuteScalar());
     }
 
     public void AssignFileToEvent(int fileId, int eventId)
@@ -166,46 +132,13 @@ public class PhotoDb
     {
         using (SqliteTransaction transaction = _sqliteConnection.BeginTransaction())
         {
-            using (var command = _sqliteConnection.CreateCommand())
-            {
-                command.Transaction = transaction;
-
-                StringBuilder builder = new StringBuilder();
-                bool isFirst = true;
-                int maxQueryLenght = 4096;
-                var baseSqlQuery = "INSERT INTO fileEvent (fileId, eventId) VALUES ";
-                int rowsAffected = 0;
-                foreach (int fileId in files)
-                {
-                    if (!isFirst)
-                    {
-                        builder.Append(", ");
-                    }
-
-                    builder.Append($"({fileId}, {eventId})");
-                    isFirst = false;
-
-                    if (builder.Length > maxQueryLenght)
-                    {
-                        command.CommandText = baseSqlQuery + builder.ToString();
-                        rowsAffected = command.ExecuteNonQuery();
-                        builder.Clear();
-                    }
-                }
-
-                if (builder.Length > 0)
-                {
-                    command.CommandText = baseSqlQuery + builder.ToString();
-                    rowsAffected += command.ExecuteNonQuery();
-                }
-            }
+            AssignFilesToEventInternal(files, eventId, transaction);
             transaction.Commit();
         }
     }
-
     public void DeleteFileFromEvent(int fileId, int eventId)
     {
-        AssignFilesToEvent(new int[] { fileId }, eventId);
+        DeleteFilesFromEvent(new int[] { fileId }, eventId);
     }
     public void DeleteFilesFromEvent(IEnumerable<int> files, int eventId)
     {
@@ -263,14 +196,17 @@ public class PhotoDb
             throw new Exception("Not all the requested lines where deleted");
         }
     }
-    public IEnumerable<FileRecord> GetFilesByEvent(string eventName)
-    {
-        throw new NotImplementedException();
-    }
-
     public IEnumerable<FileRecord> GetFilesByEventId(int eventId)
     {
-        throw new NotImplementedException();
+        var command = _sqliteConnection.CreateCommand();
+        List<FileRecord> records = [];
+        command.CommandText = $"SELECT * FROM files WHERE id in (SELECT fileId FROM fileEvent WHERE eventId = {eventId})";
+        var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            records.Add(GetFullFileRecord(reader));
+        }
+        return records;
     }
 
     public IEnumerable<FileRecord> GetAllFiles()
@@ -281,18 +217,101 @@ public class PhotoDb
         var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            DateTime creationDate = DateTime.Parse(reader["creation"].ToString());
-            records.Add(new FileRecord(Convert.ToInt32(reader["id"]), reader["filename"].ToString(), Convert.ToInt32(reader["size"]), reader["hash"].ToString(), reader["path"].ToString(), creationDate));
+            records.Add(GetFullFileRecord(reader));
         }
 
         return records;
     }
 
-    public void Deinit()
+
+    #region Private functionalities
+    private void AssignFilesToEventInternal(IEnumerable<int> files, int eventId, SqliteTransaction transaction)
     {
-        _sqliteConnection?.Close();
-        SqliteConnection.ClearAllPools();
+        using (var command = _sqliteConnection.CreateCommand())
+        {
+            if (transaction != null)
+                command.Transaction = transaction;
+
+            StringBuilder builder = new StringBuilder();
+            bool isFirst = true;
+            int maxQueryLenght = 4096;
+            var baseSqlQuery = "INSERT INTO fileEvent (fileId, eventId) VALUES ";
+            int rowsAffected = 0;
+            foreach (int fileId in files)
+            {
+                if (!isFirst)
+                {
+                    builder.Append(", ");
+                }
+
+                builder.Append($"({fileId}, {eventId})");
+                isFirst = false;
+
+                if (builder.Length > maxQueryLenght)
+                {
+                    command.CommandText = baseSqlQuery + builder.ToString();
+                    rowsAffected = command.ExecuteNonQuery();
+                    builder.Clear();
+                }
+            }
+
+            if (builder.Length > 0)
+            {
+                command.CommandText = baseSqlQuery + builder.ToString();
+                rowsAffected += command.ExecuteNonQuery();
+            }
+        }
+    }
+
+    private static void CreateMissingFolders(string filePath)
+    {
+        var path = Path.GetDirectoryName(filePath);
+        if (path != null && path != string.Empty)
+            Directory.CreateDirectory(path);
+    }
+    private static void CreateTables(SqliteConnection connection)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText =
+            @"CREATE TABLE files (id INTEGER PRIMARY KEY ASC AUTOINCREMENT, filename VARCHAR(256) , size INT, hash CHARACTER(64), path VARCHAR(256), creation DATETIME)";
+        command.ExecuteNonQuery();
+
+        command.CommandText =
+                    @"CREATE TABLE events (id INTEGER PRIMARY KEY ASC AUTOINCREMENT, name VARCHAR(256))";
+        command.ExecuteNonQuery();
+
+        command.CommandText =
+                    @"CREATE TABLE fileEvent (fileId INTEGER REFERENCES files (id), eventId INTEGER REFERENCES events (id), PRIMARY KEY (fileId, eventId))";
+        command.ExecuteNonQuery();
     }
 
 
+    private static FileRecord GetFullFileRecord(SqliteDataReader reader)
+    {
+        DateTime creationDate = DateTime.Parse(reader["creation"].ToString());
+        return new FileRecord(Convert.ToInt32(reader["id"]), reader["filename"].ToString(), Convert.ToInt32(reader["size"]), reader["hash"].ToString(), reader["path"].ToString(), creationDate);
+    }
+    private static EventRecord GetFullEventRecord(SqliteDataReader reader)
+    {
+        return new EventRecord(Convert.ToInt32(reader["Id"]), reader["name"].ToString());
+    }
+
+    private int AddFileInternal(string filename, int size, string hash, string path, DateTime date)
+    {
+        var command = _sqliteConnection.CreateCommand();
+        command.CommandText = $"INSERT INTO files (filename, size, hash, path, creation) VALUES (@filename, @size, @hash, @path, @date)";
+        command.Parameters.AddWithValue("@filename", filename);
+        command.Parameters.AddWithValue("@size", size);
+        command.Parameters.AddWithValue("@hash", hash);
+        command.Parameters.AddWithValue("@path", path);
+        command.Parameters.AddWithValue("@date", date.ToString("yyyy-MM-dd HH:mm:ss"));
+        int rowsAffected = command.ExecuteNonQuery();
+        if (rowsAffected == 0)
+        {
+            throw new Exception("Unable to insert file");
+        }
+        command.CommandText = "SELECT last_insert_rowid()";
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+    #endregion
 }
